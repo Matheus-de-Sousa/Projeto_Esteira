@@ -33,12 +33,16 @@ using namespace cpp_freertos;
 class TaskEspNow : public Thread, public Singleton<TaskEspNow>
 {
     public:
-        TaskEspNow(std::string name, uint32_t stackDepth, UBaseType_t priority);
+        TaskEspNow(std::string name, uint32_t stackDepth, UBaseType_t priority, SharedStruct *sharedData);
         SharedStruct getPacket();
 
         void Run() override;
 
+        /// @brief Envia dados via ESPNOW
+        void Send(SharedStruct Packet);
     private:
+
+        bool wifiAlreadyInit = false;
         
         uint8_t broadcastAddress[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
         //uint8_t broadcastAddress[6] = {0xe0,0xe2,0xe6,0x0d,0x43,0x0c};
@@ -49,8 +53,6 @@ class TaskEspNow : public Thread, public Singleton<TaskEspNow>
         static void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status); // Evento para enviar o dado
         static void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len); // Evento de dado Recebido
 
-        /// @brief Envia dados via ESPNOW
-        void Send(SharedStruct Packet);
 
         esp_now_peer_info_t peerInfo; // Variável para adicionar o peer
         SemaphoreHandle_t xSemaphorePeerInfo;
@@ -58,6 +60,8 @@ class TaskEspNow : public Thread, public Singleton<TaskEspNow>
 
         SharedStruct packetReceived;
         static QueueHandle_t queuePacketsReceived;
+
+        SharedStruct *shared = NULL;
 };
 
 #endif

@@ -2,18 +2,20 @@
 
 QueueHandle_t TaskEspNow::queuePacketsReceived;
 
-TaskEspNow::TaskEspNow(std::string name, uint32_t stackDepth, UBaseType_t priority):Thread(name, stackDepth, priority)
+TaskEspNow::TaskEspNow(std::string name, uint32_t stackDepth, UBaseType_t priority, SharedStruct *sharedData):Thread(name, stackDepth, priority)
 {
-    esp_log_level_set(name.c_str(), ESP_LOG_INFO);
+    esp_log_level_set(name.c_str(), ESP_LOG_ERROR);
     ESP_LOGI(GetName().c_str(), "Inicializando EspNow");
 
     (xSemaphorePeerInfo) = xSemaphoreCreateMutex();
     (xSemaphoreSharedPacket) = xSemaphoreCreateMutex();
 
     queuePacketsReceived = xQueueCreate(10, sizeof(SharedStruct));
+    shared = sharedData;
 
     this->ESPNOWInit(11, broadcastAddress, false);
     this->Start();
+
 }
 
 void TaskEspNow::Run()
@@ -22,6 +24,16 @@ void TaskEspNow::Run()
     {
         vTaskDelay(0);
         xQueueReceive(queuePacketsReceived, &packetReceived, portMAX_DELAY);
+        if(shared->xSemaphore != NULL )
+        {
+            if( xSemaphoreTake( shared->xSemaphore, ( TickType_t ) 10 ) == pdTRUE )
+            {
+                SemaphoreHandle_t smptmp = shared->xSemaphore;
+                (*shared) = packetReceived;
+                shared->xSemaphore = smptmp;
+                xSemaphoreGive( shared->xSemaphore );
+            }
+        }
     }   
 }
 
@@ -31,18 +43,30 @@ void TaskEspNow::Run()
 /// @param criptografia Ativa ou desativa a criptografia
 void TaskEspNow::ESPNOWInit(uint8_t canal, uint8_t *Mac, bool criptografia)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
-    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK( esp_wifi_start());
-    ESP_ERROR_CHECK( esp_wifi_set_channel(canal, WIFI_SECOND_CHAN_NONE));
+    // Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK( nvs_flash_erase() );
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( ret );
+    if (!wifiAlreadyInit)
+    {
+        ESP_ERROR_CHECK(esp_netif_init());
+        esp_event_loop_create_default();
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
+        ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
+        ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA));
+        ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+        ESP_ERROR_CHECK( esp_wifi_start());
+        ESP_ERROR_CHECK( esp_wifi_set_channel(canal, WIFI_SECOND_CHAN_NONE));
 
 #if CONFIG_ESPNOW_ENABLE_LONG_RANGE
     ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_LR) );
 #endif
+        wifiAlreadyInit = true;
+    }
     if (xSemaphoreTake(xSemaphorePeerInfo, (TickType_t)10) == pdTRUE)
     {
         memcpy(this->peerInfo.peer_addr, Mac, canal);
@@ -53,11 +77,11 @@ void TaskEspNow::ESPNOWInit(uint8_t canal, uint8_t *Mac, bool criptografia)
     }
     else
     {
-        ESP_LOGE("TaskEspNow", "Variável PeerInfo ocupada, não foi possível definir valor.");
+        ESP_LOGE(GetName().c_str(), "Variável PeerInfo ocupada, não foi possível definir valor.");
     }
 
     if (esp_now_init() != 0)
-        ESP_LOGI("TaskEspNow", "Falha ao iniciar");
+        ESP_LOGI(GetName().c_str(), "Falha ao iniciar");
 
     // Once ESPNow is successfully Init, we will register for Send CB to
     // get the status of Trasnmitted packet
@@ -66,10 +90,10 @@ void TaskEspNow::ESPNOWInit(uint8_t canal, uint8_t *Mac, bool criptografia)
     // Adiciona peer
     if (xSemaphoreTake(xSemaphorePeerInfo, (TickType_t)10) == pdTRUE)
     {
-        ESP_LOGD("ESP-NOW", "PeerMac : %x|%x|%x|%x|%x|%x ", this->peerInfo.peer_addr[0], this->peerInfo.peer_addr[1], this->peerInfo.peer_addr[2], this->peerInfo.peer_addr[3], this->peerInfo.peer_addr[4], this->peerInfo.peer_addr[5]);
+        ESP_LOGD(GetName().c_str(), "PeerMac : %x|%x|%x|%x|%x|%x ", this->peerInfo.peer_addr[0], this->peerInfo.peer_addr[1], this->peerInfo.peer_addr[2], this->peerInfo.peer_addr[3], this->peerInfo.peer_addr[4], this->peerInfo.peer_addr[5]);
         if (esp_now_add_peer(&(this->peerInfo)) != ESP_OK)
         {
-            ESP_LOGD("ESP-NOW", "Failed to add peer");
+            ESP_LOGD(GetName().c_str(), "Failed to add peer");
             xSemaphoreGive(xSemaphorePeerInfo);
             return;
         }
@@ -84,7 +108,7 @@ void TaskEspNow::ESPNOWInit(uint8_t canal, uint8_t *Mac, bool criptografia)
 void TaskEspNow::Send(SharedStruct Packet)
 {
 
-    ESP_LOGI("ESP-NOW", "Mac Destino : %x|%x|%x|%x|%x|%x ", this->peerInfo.peer_addr[0], this->peerInfo.peer_addr[1], this->peerInfo.peer_addr[2], this->peerInfo.peer_addr[3], this->peerInfo.peer_addr[4], this->peerInfo.peer_addr[5]);
+    ESP_LOGI(GetName().c_str(), "Mac Destino : %x|%x|%x|%x|%x|%x ", this->peerInfo.peer_addr[0], this->peerInfo.peer_addr[1], this->peerInfo.peer_addr[2], this->peerInfo.peer_addr[3], this->peerInfo.peer_addr[4], this->peerInfo.peer_addr[5]);
     esp_now_send(this->peerInfo.peer_addr, (uint8_t *)&Packet, sizeof(SharedStruct));
     vTaskDelay(0);
 
@@ -117,7 +141,7 @@ SharedStruct TaskEspNow::getPacket()
     }
     else
     {
-        ESP_LOGE("TaskEspNow", "Semáforo ocupado");
+        ESP_LOGE(GetName().c_str(), "Semáforo ocupado");
         return tempPacket;
     }
 }

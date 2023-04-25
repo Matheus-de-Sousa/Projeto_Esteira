@@ -2,13 +2,14 @@
 #define SINGLETON_HPP
 
 #include "thread.hpp"
+#include "SharedStruct.hpp"
 #include <atomic>
 #include <mutex>
 
  template<class T> class Singleton
  {
      public:
-        static  T *getInstance(std::string _name = "Thread", uint32_t _stackDepth = 1000, UBaseType_t _priority = 0)
+        static  T *getInstance(std::string _name = "Thread", uint32_t _stackDepth = 1000, UBaseType_t _priority = 0, SharedStruct *_sharedData = NULL)
                 {
                         T *sin = instance.load(std::memory_order_acquire);
                         if (!sin)
@@ -17,7 +18,7 @@
                                 sin = instance.load(std::memory_order_relaxed);
                                 if (!sin)
                                 {
-                                        sin = new T(_name,_stackDepth,_priority);
+                                        sin = new T(_name,_stackDepth,_priority, _sharedData);
                                         instance.store(sin, std::memory_order_release);
                                 }
                         }

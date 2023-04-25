@@ -7,6 +7,7 @@
 #include "driver/adc.h"
 #include "EspGpios.hpp"
 #include "SharedStruct.hpp"
+#include "TaskEspNow.hpp"
 #include "esp_log.h"
 
 using namespace cpp_freertos;
@@ -29,6 +30,9 @@ public:
 
 private:
     int iloop = 0;
+    int CountRejected = 0;
+    int dutycycle = 0;
+    bool IRsensorStateant = false;
     void InitPWM(gpio_num_t pin, ledc_channel_t channel, gpio_num_t servopin, ledc_channel_t servochannel);
     void InitMotorsGpios();
     void PwmWrite(ledc_channel_t channel, int pwm);

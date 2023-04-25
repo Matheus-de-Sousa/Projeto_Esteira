@@ -10,7 +10,7 @@ TaskMotors::TaskMotors(std::string name, uint32_t stackDepth, UBaseType_t priori
     // Inicializa PWM e motores (Servo motor e motor DC)
     InitPWM((gpio_num_t)PwmPin, PWM_A_CHANNEL, (gpio_num_t)ServoPwmPin, PWM_SERVO_CHANNEL);
     InitMotorsGpios();
-    ServoWrite(PWM_SERVO_CHANNEL, 135);
+    ServoWrite(PWM_SERVO_CHANNEL, 75);
     shared = sharedData;
 }
 
@@ -20,21 +20,59 @@ void TaskMotors::Run()
     int PotRead = 0;
     for(;;)
     {
+        SharedStruct sharedTemp;
+        if(shared->xSemaphore != NULL )
+        {     
+            if( xSemaphoreTake( shared->xSemaphore, ( TickType_t ) 10 ) == pdTRUE )
+            {
+                sharedTemp = (*shared);
+                xSemaphoreGive( shared->xSemaphore );
+            }
+        }
+        dutycycle = sharedTemp.dutyCycle;
         // Lê sensor infravermelho e aciona servo motor
-        if(gpio_get_level((gpio_num_t)IRSensor))
+        if(!gpio_get_level((gpio_num_t)IRSensor) && IRsensorStateant)
         {
-            gpio_set_level((gpio_num_t)A1,0);
-            gpio_set_level((gpio_num_t)A2,0);
-            ServoWrite(PWM_SERVO_CHANNEL, 135);
+            IRsensorStateant = false;
+            CountRejected++;
+            SharedStruct sharedTempSend;
+            if(shared->xSemaphore != NULL )
+            {
+                
+                if( xSemaphoreTake( shared->xSemaphore, ( TickType_t ) 10 ) == pdTRUE )
+                {
+                    sharedTempSend = (*shared);
+                    sharedTempSend.CountRejected = CountRejected;
+                    sharedTempSend.StatusPecas = true;
+                    xSemaphoreGive( shared->xSemaphore );
+                }
+            }
+            TaskEspNow::getInstance()->Send(sharedTempSend);
+            ServoWrite(PWM_SERVO_CHANNEL, 75);
             vTaskDelay(2000 / portTICK_PERIOD_MS);
         }
-        else
+        if(gpio_get_level((gpio_num_t)IRSensor) && !IRsensorStateant)
         {
-            ServoWrite(PWM_SERVO_CHANNEL, 45);
+            IRsensorStateant = true;
+            ServoWrite(PWM_SERVO_CHANNEL, 170);
+            IRsensorStateant = true;
+            SharedStruct sharedTempSend;
+            if(shared->xSemaphore != NULL )
+            {
+                
+                if( xSemaphoreTake( shared->xSemaphore, ( TickType_t ) 10 ) == pdTRUE )
+                {
+                    sharedTempSend = (*shared);
+                    sharedTempSend.CountRejected = CountRejected;
+                    sharedTempSend.StatusPecas = false;
+                    xSemaphoreGive( shared->xSemaphore );
+                }
+            }
+            TaskEspNow::getInstance()->Send(sharedTempSend);
         }
 
         // Controla velocidade e direção do motor DC por potenciômetro
-        PotRead = adc1_get_raw(PotPin);
+        PotRead = sharedTemp.dutyCycle;
         PotRead -= 2048;
         if(PotRead <= 0)
         {
@@ -47,14 +85,17 @@ void TaskMotors::Run()
             gpio_set_level((gpio_num_t)A1,1);
             gpio_set_level((gpio_num_t)A2,0);
         }
-        PwmWrite(PWM_A_CHANNEL, PotRead * 2);
+        dutycycle = PotRead * 2;
+        PwmWrite(PWM_A_CHANNEL, dutycycle);
         iloop++;
         if(iloop>=15)
         {
             iloop = 0;
-            ESP_LOGI(GetName().c_str(), "Duty Cycle Motor:%d",PotRead * 2);
+            ESP_LOGI(GetName().c_str(), "Duty Cycle Motor:%d | %d",dutycycle,sharedTemp.dutyCycle);
+            ESP_LOGI(GetName().c_str(), "Rejeitadas:%d",CountRejected);
             ESP_LOGI(GetName().c_str(), "Sensor IR:%d",gpio_get_level((gpio_num_t)IRSensor));
         }
+
         xTaskDelayUntil(&xLastTimeWake, 100 / portTICK_PERIOD_MS);
     }
     

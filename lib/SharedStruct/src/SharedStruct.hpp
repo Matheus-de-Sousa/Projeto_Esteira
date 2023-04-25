@@ -8,11 +8,7 @@
 typedef struct
 {
     bool StatusPecas = false;
-    bool EspCamRead = false;
-    bool EspCamFinished = false;
-    int CountAccepted = 0;
     int CountRejected = 0;
-    int LCDMode = 0;
     int dutyCycle = 0;
     SemaphoreHandle_t xSemaphore = NULL;
     
